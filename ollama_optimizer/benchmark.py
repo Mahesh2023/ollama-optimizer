@@ -131,8 +131,9 @@ BENCHMARK_PROMPTS: List[Dict[str, Any]] = [
 class BenchmarkRunner:
     """Orchestrates benchmark runs, comparisons, and result persistence."""
 
-    def __init__(self, client: Optional[OllamaClient] = None) -> None:
+    def __init__(self, client: Optional[OllamaClient] = None, timeout: int = 300) -> None:
         self.client: OllamaClient = client or OllamaClient()
+        self.default_timeout = timeout
 
     # ------------------------------------------------------------------
     # Single benchmark
@@ -176,6 +177,11 @@ class BenchmarkRunner:
 
         logger.info("Benchmarking model=%s  prompt_len=%d  num_ctx=%d", model_name, len(prompt), num_ctx)
 
+        # Use a longer timeout for the generate call – large models
+        # (70B+) can take several minutes to load and respond.
+        saved_timeout = self.client.timeout
+        self.client.timeout = max(self.default_timeout, saved_timeout)
+
         try:
             wall_start = time.perf_counter()
             response: dict = self.client.generate(
@@ -202,6 +208,8 @@ class BenchmarkRunner:
                 prompt_used=prompt,
                 raw_response={"error": str(exc)},
             )
+        finally:
+            self.client.timeout = saved_timeout
 
         memory_after = self.get_memory_usage()
         memory_usage = max(memory_after, memory_before)

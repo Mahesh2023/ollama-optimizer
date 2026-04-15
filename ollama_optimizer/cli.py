@@ -457,6 +457,16 @@ def optimize(model, priority, dry_run, yes, run_bench):
                 console.print(f"[bold red]Error:[/bold red] Model '{model}' not found.")
                 sys.exit(1)
 
+        # Filter out embedding-only models (they don't support generate)
+        embed_models = [m for m in models if m.is_embedding_model]
+        models = [m for m in models if not m.is_embedding_model]
+        if embed_models:
+            names = ", ".join(m.full_name for m in embed_models)
+            console.print(f"[dim]Skipping embedding model(s): {names}[/dim]")
+        if not models:
+            console.print("[yellow]No generative models to optimize.[/yellow]")
+            sys.exit(0)
+
         console.print(f"[green]\u2713[/green] {len(models)} model(s) to optimize\n")
 
         optimizer = ModelOptimizer(client=client, system=profile, priority=priority)
@@ -482,7 +492,8 @@ def optimize(model, priority, dry_run, yes, run_bench):
 
         # ── Pre-optimization benchmarks ─────────────────────────────
         pre_bench = {}
-        runner = BenchmarkRunner(client)
+        # Use a generous timeout — large models (70B+) can take minutes to load
+        runner = BenchmarkRunner(client, timeout=600)
         if run_bench:
             console.print("\n[bold]Pre-optimization benchmarks[/bold]\n")
             for p in actionable:
@@ -598,7 +609,7 @@ def benchmark_cmd(model, compare, runs, save):
         if not _check_ollama(client):
             sys.exit(1)
 
-        runner = BenchmarkRunner(client)
+        runner = BenchmarkRunner(client, timeout=600)
 
         if compare:
             if not model:
@@ -630,6 +641,16 @@ def benchmark_cmd(model, compare, runs, save):
                 models = client.list_models()
             if not models:
                 console.print("[yellow]No models installed.[/yellow]")
+                sys.exit(0)
+
+            # Filter out embedding-only models (they don't support generate)
+            embed_models = [m for m in models if m.is_embedding_model]
+            models = [m for m in models if not m.is_embedding_model]
+            if embed_models:
+                names = ", ".join(m.full_name for m in embed_models)
+                console.print(f"[dim]Skipping embedding model(s): {names}[/dim]")
+            if not models:
+                console.print("[yellow]No generative models to benchmark.[/yellow]")
                 sys.exit(0)
 
             console.print(f"[bold]Benchmarking {len(models)} model(s)[/bold]\n")

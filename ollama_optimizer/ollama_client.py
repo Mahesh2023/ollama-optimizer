@@ -49,6 +49,20 @@ class OllamaModel:
         """Model size in gigabytes (rounded to two decimals)."""
         return round(self.size_bytes / (1024 ** 3), 2)
 
+    @property
+    def is_embedding_model(self) -> bool:
+        """Return True if this model is embedding-only (does not support generate)."""
+        name_lower = f"{self.name}:{self.tag}".lower()
+        family_lower = self.family.lower()
+        # Known embedding model families and name patterns
+        if any(tok in name_lower for tok in ["embed", "nomic-embed", "bge-",
+                                              "e5-", "gte-", "sentence-"]):
+            return True
+        if any(tok in family_lower for tok in ["bert", "nomic-bert",
+                                                "xlm-roberta"]):
+            return True
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
