@@ -42,9 +42,9 @@ dev = ["pytest>=7.0", "pytest-mock>=3.10"]
 ollama-optimizer = "ollama_optimizer.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ollama-optimizer/ollama-optimizer"
-Documentation = "https://github.com/ollama-optimizer/ollama-optimizer#readme"
-Issues = "https://github.com/ollama-optimizer/ollama-optimizer/issues"
+Homepage = "https://github.com/Mahesh2023/ollama-optimizer"
+Documentation = "https://github.com/Mahesh2023/ollama-optimizer#readme"
+Issues = "https://github.com/Mahesh2023/ollama-optimizer/issues"
 
 [tool.setuptools.packages.find]
 include = ["ollama_optimizer*"]

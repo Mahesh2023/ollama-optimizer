@@ -66,7 +66,7 @@ Run `ollama-optimizer explain` for a full interactive demo.
 ### Install from source
 
 ```bash
-git clone https://github.com/ollama-optimizer/ollama-optimizer.git
+git clone https://github.com/Mahesh2023/ollama-optimizer.git
 cd ollama-optimizer
 pip install .
 ```
