@@ -595,30 +595,16 @@ class ModelOptimizer:
     def generate_modelfile(self, plan: OptimizationPlan) -> str:
         """Generate an Ollama Modelfile that applies the optimization.
 
-        For requantization, FROM points to the new quant variant tag.
+        For requantization, we currently use the local model as base and apply
+        runtime parameter tuning. Full requantization requires llama.cpp integration.
         For runtime tuning only, FROM references the current model.
         """
         lines: List[str] = []
 
-        if plan.action in ("requantize_down", "requantize_up"):
-            # Construct Ollama model tag: base:paramsize-quantlevel
-            # e.g. "llama3.2:3b-q4_K_M" from model "llama3.2:3b" + quant "Q4_K_M"
-            base_name = plan.model_name.split(":")[0]
-            # Try to extract param size from the current tag (e.g., "3b" from "llama3.2:3b")
-            current_tag = plan.model_name.split(":")[-1] if ":" in plan.model_name else ""
-            param_part = ""
-            for part in current_tag.replace("-", " ").split():
-                if part and part[0].isdigit() and part[-1].lower() == "b":
-                    param_part = part.lower()
-                    break
-
-            quant_tag = plan.recommended_quant.lower()
-            if param_part:
-                from_ref = f"{base_name}:{param_part}-{quant_tag}"
-            else:
-                from_ref = f"{base_name}:{quant_tag}"
-        else:
-            from_ref = plan.model_name
+        # Always reference the actual local model to avoid "neither 'from' or 'files' was specified" error
+        # Requantization requires pulling the target quantization variant from Ollama registry,
+        # which may not exist. For now, we optimize by tuning runtime parameters only.
+        from_ref = plan.model_name
 
         lines.append(f"FROM {from_ref}")
         lines.append("")
@@ -634,7 +620,7 @@ class ModelOptimizer:
         lines.append(
             'SYSTEM """You are a helpful assistant. '
             "This model has been optimized by ollama-optimizer "
-            f'(priority={plan.recommended_quant})."""'
+            f'(priority={self.priority})."""'
         )
 
         return "\n".join(lines) + "\n"
@@ -647,38 +633,27 @@ class ModelOptimizer:
         """Apply an optimization plan.
 
         1. Generate a Modelfile from the plan.
-        2. If requantizing, pull the target quant variant.
-        3. Use ``ollama create`` to register the optimized model.
-        4. Naming: ``<original_name>-optimized``.
+        2. Use ``ollama create`` to register the optimized model with tuned runtime parameters.
+        3. Naming: ``<original_name>-optimized``.
+        
+        Note: Full requantization requires llama.cpp integration. Current implementation
+        optimizes via runtime parameter tuning (threads, context, GPU layers, etc.).
         """
         old_tag = plan.model_name
         base_name = plan.model_name.split(":")[0]
         new_tag = f"{base_name}-optimized"
         modelfile_content = self.generate_modelfile(plan)
+        from_ref = plan.model_name  # Use the actual model as the base
 
         logger.info("Applying: %s -> %s (action=%s)", old_tag, new_tag, plan.action)
 
         try:
-            # Pull the new quant variant if requantizing
-            if plan.action in ("requantize_down", "requantize_up"):
-                # Extract the FROM reference from the modelfile
-                from_line = modelfile_content.split("\n")[0]
-                pull_target = from_line.replace("FROM ", "").strip()
-                logger.info("Pulling quantization variant: %s", pull_target)
-                try:
-                    for status in self.client.pull_model(pull_target):
-                        if status.get("status") == "success":
-                            logger.info("Pull complete: %s", pull_target)
-                        elif "error" in status:
-                            logger.warning("Pull warning: %s", status.get("error"))
-                except Exception:
-                    logger.exception(
-                        "Failed to pull %s – attempting create anyway", pull_target
-                    )
+            # Skip pulling quantization variants - we optimize via runtime tuning only
+            # Full requantization requires llama.cpp integration (future work)
 
-            # Create the optimized model
+            # Create the optimized model with tuned runtime parameters
             logger.info("Creating optimized model: %s", new_tag)
-            for status in self.client.create_model(name=new_tag, modelfile=modelfile_content):
+            for status in self.client.create_model(name=new_tag, modelfile=modelfile_content, from_model=from_ref):
                 if status.get("status") == "success":
                     logger.info("Model created: %s", new_tag)
                 elif "error" in status:

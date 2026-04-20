@@ -311,7 +311,7 @@ class OllamaClient:
 
         logger.info("Pull of '%s' complete", name)
 
-    def create_model(self, name: str, modelfile: str) -> Generator[Dict[str, Any], None, None]:
+    def create_model(self, name: str, modelfile: str, from_model: Optional[str] = None) -> Generator[Dict[str, Any], None, None]:
         """Create a new model from a Modelfile.
 
         Calls ``POST /api/create`` in streaming mode and yields status
@@ -323,6 +323,8 @@ class OllamaClient:
             Name for the newly created model.
         modelfile:
             The Modelfile content as a string.
+        from_model:
+            Optional base model to use (bypasses modelfile FROM line parsing).
 
         Yields
         ------
@@ -330,7 +332,16 @@ class OllamaClient:
             Status updates from the server.
         """
         logger.info("Creating model '%s'", name)
-        payload = {"name": name, "modelfile": modelfile, "stream": True}
+        payload: Dict[str, Any] = {"name": name, "stream": True}
+        
+        # If from_model is provided, use it directly to avoid parsing issues
+        if from_model:
+            payload["from"] = from_model
+            # Still include modelfile for parameter tuning
+            payload["modelfile"] = modelfile
+        else:
+            payload["modelfile"] = modelfile
+            
         resp = self._post("/api/create", payload, stream=True)
         yield from self._iter_ndjson(resp)
         logger.info("Model '%s' created", name)

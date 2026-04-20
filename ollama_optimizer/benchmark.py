@@ -173,6 +173,37 @@ class BenchmarkRunner:
             A populated result dataclass.
         """
         timestamp = datetime.now(timezone.utc).isoformat()
+        
+        # Check if this is an embedding model
+        try:
+            models = self.client.list_models()
+            model_obj = None
+            for m in models:
+                if m.full_name == model_name or m.name == model_name:
+                    model_obj = m
+                    break
+            
+            if model_obj and model_obj.is_embedding_model:
+                logger.warning("Model %s is an embedding model - text generation benchmarks not supported", model_name)
+                return BenchmarkResult(
+                    model_name=model_name,
+                    timestamp=timestamp,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    time_to_first_token_ms=0.0,
+                    tokens_per_second=0.0,
+                    total_time_seconds=0.0,
+                    prompt_eval_rate=0.0,
+                    eval_rate=0.0,
+                    memory_usage_mb=0.0,
+                    load_time_seconds=0.0,
+                    prompt_used=prompt,
+                    raw_response={"error": "embedding model does not support text generation"},
+                )
+        except Exception as exc:
+            logger.warning("Failed to check model type for %s: %s", model_name, exc)
+        
         memory_before = self.get_memory_usage()
 
         logger.info("Benchmarking model=%s  prompt_len=%d  num_ctx=%d", model_name, len(prompt), num_ctx)
