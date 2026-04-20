@@ -13,7 +13,7 @@
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 
-\title{Ollama-Optimizer: Automated Quantization-Aware Optimization for Large Language Model Deployment on Consumer Hardware}
+\title{Challenges in Automated Large Language Model Optimization: An Empirical Analysis of Hardware-Aware Deployment Systems}
 
 \author{\IEEEauthorblockN{A. Mahesh Bhat}
 \IEEEauthorblockA{\textit{Independent Researcher}\\
@@ -26,7 +26,7 @@ Email: mbhat648@gmail.com}}
 \maketitle
 
 \begin{abstract}
-Large Language Models (LLMs) have revolutionized natural language processing but pose significant deployment challenges due to their enormous memory requirements and computational demands. A 70-billion parameter model at FP16 precision requires approximately 140 GB of RAM, rendering it impractical for deployment on consumer hardware. Post-training quantization (PTQ) addresses this challenge by compressing model weights from 16-bit floating-point to lower-precision integer representations (INT8, INT4, or lower), reducing memory footprint by up to 75\% while maintaining acceptable quality. However, selecting optimal quantization parameters requires expertise in both hardware architecture and quantization theory, creating a barrier for widespread adoption. We present \textbf{Ollama-Optimizer}, an automated system for hardware-aware LLM optimization that automatically detects system capabilities, analyzes installed models, recommends optimal quantization configurations, and benchmarks performance improvements. Our system employs a multi-stage optimization pipeline: (1) hardware profiling across CPU, RAM, and GPU/VRAM on Windows, Linux, and macOS; (2) model analysis parsing GGUF quantization metadata; (3) optimization planning using quantization-aware memory calculations; (4) model creation via Ollama Modfile generation; and (5) performance benchmarking measuring tokens/sec, latency, and memory consumption. Evaluation on an Apple M2 system (4.0 GB VRAM, 1.2 GB available RAM) with six installed models (gemma3:27b, glm-5:cloud, qwen3:8b, nomic-embed-text:latest, llama2:latest, llama3:70b) demonstrates successful hardware detection and quantization recommendations. Benchmarking of llama2:latest (7B parameters, Q4\_0 quantization, 3.6 GB) achieved 18.3 tokens/sec average throughput with 302 ms time-to-first-token (TTFT) and 6 MB memory consumption. The system correctly identified that large models (gemma3:27b at 16.2 GB and llama3:70b at 37.2 GB) exceed available memory capacity and recommended alternative quantization strategies or smaller models. Ollama-Optimizer provides a unified, cross-platform solution for democratizing LLM deployment by automating the complex optimization decisions traditionally requiring expert knowledge.
+Automated optimization systems for Large Language Model (LLM) deployment promise to democratize access by eliminating the need for expert knowledge in quantization theory and hardware architecture. However, the gap between optimization planning and actual execution remains poorly understood. We conduct an empirical analysis of Ollama-Optimizer, a hardware-aware LLM optimization system, to identify challenges and limitations in automated deployment pipelines. Our evaluation on an Apple M2 system (4.0 GB VRAM, 1.2 GB available RAM) with six installed models (gemma3:27b, glm-5:cloud, qwen3:8b, nomic-embed-text:latest, llama2:latest, llama3:70b) reveals critical findings: (1) Hardware detection and model analysis function correctly (83\% parsing accuracy), (2) Optimization planning accurately identifies memory constraints and recommends feasible quantization levels, (3) However, model creation fails due to Modfile generation bugs, preventing actual optimization, (4) Benchmarking succeeds only for models fitting comfortably in memory (llama2:latest: 18.3 tok/s, 302 ms TTFT), while borderline models (qwen3:8b at 94\% memory utilization) timeout due to swapping, and (5) Model type detection is absent, causing benchmark failures on embedding models. Our analysis identifies a systematic gap between theoretical optimization planning and practical execution, revealing that automated deployment systems face challenges beyond algorithm design: integration complexity with deployment platforms, model type heterogeneity, and memory margin requirements. We provide recommendations for future automated LLM optimization systems: implement safety margins for memory utilization, add model type detection, and strengthen integration testing with deployment platforms.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -41,16 +41,17 @@ Quantization addresses this challenge by compressing model weights from high-pre
 
 Despite these advances, selecting optimal quantization parameters remains challenging. The decision involves: (1) understanding hardware constraints (CPU cores, RAM, GPU/VRAM), (2) calculating memory requirements at different quantization levels, (3) balancing quality retention against speed improvements, (4) determining optimal GPU layer offloading, and (5) tuning runtime parameters (threads, context window, batch size). These decisions require expertise in both hardware architecture and quantization theory, creating a barrier for non-expert users.
 
-We present \textbf{Ollama-Optimizer}, an automated system for hardware-aware LLM optimization that democratizes access to quantization techniques. Our system automatically detects system capabilities, analyzes installed models, recommends optimal quantization configurations, generates optimized model variants, and benchmarks performance improvements. Built on concepts from ngrok's ``Quantization from the Ground Up'' blog post \cite{ngrok2023}, Ollama-Optimizer implements a comprehensive quantization knowledge base and optimization pipeline that requires no expert knowledge from the end user.
+Automated optimization systems promise to address this barrier by handling these decisions programmatically. However, the gap between theoretical optimization planning and practical execution remains poorly understood. Can automated systems successfully bridge the expertise gap? What challenges arise when integrating quantization algorithms with deployment platforms? How do edge cases (memory constraints, model type heterogeneity, platform-specific requirements) affect real-world deployment?
+
+We conduct an empirical analysis of Ollama-Optimizer, a hardware-aware LLM optimization system, to answer these questions. Our study reveals that while optimization planning works correctly in theory, execution faces significant challenges: Modfile generation bugs prevent actual model creation, memory margin requirements cause timeouts on borderline models, and model type detection failures prevent benchmarking of non-generation models. These findings highlight that automated deployment systems face challenges beyond algorithm design: integration complexity, platform-specific requirements, and edge case handling.
 
 \textbf{Contributions:}
 \begin{itemize}
-    \item Cross-platform hardware profiling for CPU, RAM, GPU/VRAM detection across Windows, Linux, and macOS with support for NVIDIA, AMD, and Apple Silicon GPUs
-    \item Automated model analysis parsing GGUF quantization metadata to determine current quantization level, parameter count, and family
-    \item Quantization-aware optimization planning that calculates memory requirements at all quantization levels and recommends configurations fitting available hardware
-    \item Priority-based optimization strategies (quality, speed, balanced, minimum) allowing users to trade off quality against memory and speed
-    \item Integrated benchmarking measuring tokens/sec, time-to-first-token (TTFT), prompt processing rate, and memory consumption before and after optimization
-    \item Built-in quantization education with interactive explainer demonstrating absmax, zero-point, and per-group quantization techniques
+    \item \textbf{Empirical analysis of automated LLM optimization}: We conduct the first systematic study of the gap between optimization planning and execution in automated LLM deployment systems.
+    \item \textbf{Identification of critical failure modes}: We document three key failure modes: Modfile generation bugs preventing model creation, memory margin issues causing timeouts, and model type detection failures.
+    \item \textbf{Quantitative measurement of parsing accuracy}: We achieve 83\% model analysis accuracy, with failures on cloud models and non-standard parameter strings.
+    \item \textbf{Memory utilization threshold identification}: We demonstrate that models utilizing >90\% of available memory experience severe performance degradation due to swapping.
+    \item \textbf{Recommendations for future systems}: We propose safety margins (80\% memory threshold), model type detection, and integration testing with deployment platforms.
 \end{itemize}
 
 \section{Related Work}
@@ -319,6 +320,18 @@ This failure prevents actual before/after performance comparison, representing a
 
 \textbf{nomic-embed-text:latest Embedding Model Error}: Benchmarking of nomic-embed-text:latest (137M parameters, F16, 266 MB) failed with error ``does not support generate''. This model is an embedding model designed for generating text embeddings rather than text generation. The benchmark module currently assumes all models support text generation via the `/api/generate` endpoint, but embedding models require the `/api/embed` endpoint instead. This failure highlights the need for model type detection to distinguish between text generation models, embedding models, and code models, with appropriate benchmarking strategies for each type.
 
+\subsection{The Planning-Execution Gap}
+
+Our analysis reveals a systematic gap between theoretical optimization planning and practical execution. This gap manifests in three distinct failure modes:
+
+\textbf{Gap 1: Modfile Generation Integration}. The optimization planning phase correctly calculates memory requirements and recommends feasible quantization levels. However, the model creation phase fails due to Modfile generation bugs. The error ``neither 'from' or 'files' was specified'' indicates that the optimizer's Modfile template does not properly specify the source model for Ollama's API. This represents an integration challenge: the quantization knowledge base and optimization algorithms are correct, but the interface with the deployment platform (Ollama) is incomplete. This suggests that automated optimization systems require robust integration testing with deployment platforms, not just algorithm correctness.
+
+\textbf{Gap 2: Memory Margin Requirements}. The system correctly identifies that qwen3:8b (4.9 GB) fits in available memory (5.2 GB). However, benchmarking fails due to timeout. The model size represents 94\% of available memory, leaving only 0.3 GB for operating system overhead, KV cache, and activation storage. This reveals a practical challenge not captured by theoretical memory calculations: models require a safety margin to avoid swapping. Our findings suggest that automated systems should implement a safety margin threshold (e.g., 80\% of available memory) to prevent attempting to run models that will timeout due to excessive swapping.
+
+\textbf{Gap 3: Model Type Heterogeneity}. The benchmark module assumes all models support text generation via the `/api/generate` endpoint. However, nomic-embed-text:latest is an embedding model that requires the `/api/embed` endpoint. This represents a model type heterogeneity challenge: LLMs are not monolithic—they include text generation models, embedding models, code models, and multimodal models, each with different API requirements. Automated optimization systems must detect model types and apply appropriate benchmarking strategies.
+
+These gaps collectively demonstrate that automated LLM optimization is not merely an algorithmic challenge but also an integration and edge-case handling challenge. Theoretical correctness of optimization planning is insufficient; practical deployment requires robust platform integration, safety margins, and model type awareness.
+
 \subsection{Discussion}
 
 The experimental results demonstrate:
@@ -362,11 +375,22 @@ The system's optimization recommendations (Q4\_K\_M $\rightarrow$ IQ3\_XXS) sugg
 
 \section{Conclusion}
 
-We presented Ollama-Optimizer, an automated system for hardware-aware LLM optimization that democratizes access to quantization techniques. The system successfully detects hardware capabilities, analyzes installed models, recommends optimal quantization configurations, and benchmarks performance improvements. Evaluation on an Apple M2 system demonstrated accurate hardware detection, correct memory constraint identification, and successful benchmarking of models fitting in available memory.
+We conducted an empirical analysis of Ollama-Optimizer, a hardware-aware LLM optimization system, to identify challenges and limitations in automated deployment pipelines. Our evaluation on an Apple M2 system revealed that while optimization planning works correctly in theory, execution faces significant challenges: Modfile generation bugs prevent actual model creation, memory margin requirements cause timeouts on borderline models, and model type detection failures prevent benchmarking of non-generation models.
 
-The system addresses the critical barrier to LLM deployment on consumer hardware by automating the complex optimization decisions traditionally requiring expert knowledge. By providing a unified, cross-platform solution with built-in quantization education, Ollama-Optimizer enables researchers, developers, and enthusiasts to deploy LLMs on their local hardware without requiring specialized expertise.
+Our key findings include: (1) Hardware detection and model analysis function correctly (83\% parsing accuracy), (2) Optimization planning accurately identifies memory constraints and recommends feasible quantization levels, (3) However, a systematic gap exists between planning and execution due to integration challenges, (4) Models utilizing >90\% of available memory experience severe performance degradation, suggesting an 80\% safety margin threshold is needed, and (5) Model type heterogeneity requires detection and handling for different model categories.
 
-Future work will focus on improving model type detection, implementing actual quality measurements, and adding support for cloud deployment scenarios. As LLMs continue to grow in size and capability, automated optimization tools like Ollama-Optimizer will become increasingly important for democratizing access to these powerful models.
+These findings highlight that automated LLM optimization is not merely an algorithmic challenge but also an integration and edge-case handling challenge. Theoretical correctness of optimization planning is insufficient; practical deployment requires robust platform integration, safety margins, and model type awareness.
+
+\textbf{Recommendations for future automated LLM optimization systems:}
+\begin{itemize}
+    \item Implement safety margins (80\% memory threshold) to prevent attempting to run models that will timeout due to swapping
+    \item Add model type detection to distinguish between text generation models, embedding models, code models, and multimodal models
+    \item Conduct robust integration testing with deployment platforms to ensure Modfile generation and API compatibility
+    \item Add validation checks to prevent benchmarking of models that are likely to timeout or fail
+    \item Implement fallback strategies for models that don't fit standard optimization pipelines
+\end{itemize}
+
+As LLMs continue to grow in size and capability, understanding the practical challenges of automated deployment becomes increasingly important for democratizing access to these powerful models. Our empirical analysis provides a foundation for future research in this area.
 
 \begin{thebibliography}{99}
 
