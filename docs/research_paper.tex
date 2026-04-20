@@ -261,6 +261,16 @@ Run & Tokens/sec & TTFT (ms) & Prompt tok/s & Memory (MB) \\
 \end{tabular}
 \end{table}
 
+\subsection{Optimization Attempt}
+
+We attempted to optimize llama2:latest using the balanced priority strategy. The pre-optimization benchmark yielded 18.5 tok/s, 1081 ms TTFT, 165.7 prompt tok/s, and 2 MB memory consumption. The system recommended Q4\_0 $\rightarrow$ IQ3\_XXS quantization, predicting 23\% memory savings (3.6 GB $\rightarrow$ 2.7 GB), 1.3x speed improvement, and -13\% quality delta.
+
+However, the optimization failed during model creation with error: ``neither 'from' or 'files' was specified''. This indicates a bug in the Modfile generation logic where the system fails to properly specify the source model in the Ollama Modfile. The error occurred during the POST request to http://localhost:11434/api/create, suggesting the optimizer's Modfile template is incomplete or incorrectly formatted for this model.
+
+This failure prevents actual before/after performance comparison, representing a limitation of the current implementation. The optimization planning and recommendation phases work correctly, but the model creation step requires bug fixes to generate valid Ollama Modfiles.
+
+\subsection{Additional Benchmark Failures}
+
 Benchmarking of qwen3:8b failed due to timeout (600s), likely because the 4.9 GB model barely fits in 5.2 GB available memory, causing excessive swapping.
 
 Benchmarking of nomic-embed-text:latest failed because it is an embedding model that does not support text generation (``does not support generate'' error).
@@ -273,6 +283,8 @@ The experimental results demonstrate:
     \item \textbf{Successful model analysis}: Quantization levels were correctly parsed for 5 out of 6 models. Cloud-based models (glm-5:cloud) and models with non-standard parameter strings (nomic-embed-text) had parsing issues.
     \item \textbf{Correct memory constraint identification}: The system correctly identified that gemma3:27b (16.2 GB) and llama3:70b (37.2 GB) exceed available memory (5.2 GB) and appropriately warned the user.
     \item \textbf{Successful benchmarking}: llama2:latest (3.6 GB) benchmarked successfully with 18.3 tok/s throughput, demonstrating the system can measure performance on models that fit in memory.
+    \item \textbf{Optimization planning works correctly}: The system correctly recommended Q4\_0 $\rightarrow$ IQ3\_XXS quantization for llama2:latest with predicted 23\% memory savings and 1.3x speed improvement.
+    \item \textbf{Optimization execution bug}: The actual model creation failed due to a Modfile generation bug (``neither 'from' or 'files' was specified''), indicating the optimizer's Modfile template is incomplete or incorrectly formatted.
     \item \textbf{Timeout on borderline models}: qwen3:8b (4.9 GB) timed out during benchmarking, indicating that models barely fitting in available memory may experience performance degradation due to swapping.
     \item \textbf{Embedding model handling}: nomic-embed-text:latest failed benchmarking because embedding models do not support text generation, highlighting the need for model-type-aware benchmarking.
 \end{enumerate}
@@ -284,6 +296,7 @@ The system's optimization recommendations (Q4\_K\_M $\rightarrow$ IQ3\_XXS) sugg
 \subsection{Limitations}
 
 \begin{enumerate}
+    \item \textbf{Optimization execution bug}: The model creation step fails with ``neither 'from' or 'files' was specified'' error, indicating the Modfile generation logic is incomplete or incorrectly formatted. This prevents actual model optimization and before/after performance comparison.
     \item \textbf{Memory-constrained evaluation}: The test system had only 1.2 GB available RAM, limiting evaluation to small models (<5 GB). Large models (>10 GB) could not be benchmarked.
     \item \textbf{Model type detection}: The system does not distinguish between text generation models and embedding models, causing benchmark failures on nomic-embed-text.
     \item \textbf{Parameter count parsing}: String parsing for parameter counts (``137M'') failed in some cases.
@@ -294,6 +307,7 @@ The system's optimization recommendations (Q4\_K\_M $\rightarrow$ IQ3\_XXS) sugg
 \subsection{Future Work}
 
 \begin{enumerate}
+    \item \textbf{Fix Modfile generation bug}: Debug and fix the ``neither 'from' or 'files' was specified'' error in the model creation step to enable actual optimization and before/after performance comparison.
     \item \textbf{Model type detection}: Add detection for embedding models, code models, and multimodal models with appropriate benchmarking strategies.
     \item \textbf{Perplexity measurement}: Implement actual perplexity calculation on calibration datasets to provide more accurate quality estimates.
     \item \textbf{Task-specific benchmarks}: Integrate MMLU, HellaSwag, or other standardized benchmarks for quality evaluation.
