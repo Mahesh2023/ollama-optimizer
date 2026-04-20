@@ -420,7 +420,7 @@ The system successfully handled the Modfile generation by using the local model 
 
 \subsection{Model Type Detection Implementation}
 
-Following the embedding model failure, we implemented model type detection in the OllamaClient module. The `is_embedding_model` property uses pattern matching on model names and families to identify embedding models (e.g., nomic-embed, bge-, e5-, sentence-) and skips text generation benchmarks for these models. This implementation successfully prevents benchmark failures on non-generation models and enables appropriate benchmarking strategies for different model types.
+Following the embedding model failure, we implemented model type detection in the OllamaClient module. The is\_embedding\_model property uses pattern matching on model names and families to identify embedding models (e.g., nomic-embed, bge, e5, sentence) and skips text generation benchmarks for these models. This implementation successfully prevents benchmark failures on non-generation models and enables appropriate benchmarking strategies for different model types.
 
 \section{Discussion}
 
