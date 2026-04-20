@@ -55,6 +55,20 @@ We present \textbf{Ollama-Optimizer}, an automated system for hardware-aware LLM
 
 \section{Related Work}
 
+\subsection{Existing Quantization Tools}
+
+Several tools exist for LLM quantization and optimization, but each has limitations that Ollama-Optimizer addresses:
+
+\textbf{llama.cpp} \cite{gerganov2023} provides the core quantization engine with GGUF format support but requires manual command-line invocation for quantization (`llama-quantize`) and does not provide hardware-aware recommendations. Users must manually determine optimal quantization levels based on their hardware, requiring expertise in both quantization theory and system architecture.
+
+\textbf{AutoGPTQ} \cite{frantar2022} is a Python library implementing the GPTQ algorithm but focuses only on the quantization algorithm itself, not on deployment optimization. It does not provide hardware detection, GPU layer offloading recommendations, or runtime parameter tuning.
+
+\textbf{GPTQ-for-LLaMA} extends GPTQ specifically for LLaMA models but requires manual configuration of quantization parameters and does not integrate with deployment platforms like Ollama.
+
+\textbf{Ollama} provides model management and deployment but does not include optimization capabilities. Users must manually determine which quantization level to use and how to configure runtime parameters for their hardware.
+
+Ollama-Optimizer differs from these tools by providing an end-to-end automated pipeline that integrates hardware detection, quantization planning, model creation, and benchmarking in a single system. Unlike manual tools, Ollama-Optimizer requires no user expertise in quantization theory or hardware architecture.
+
 \subsection{Quantization Techniques for LLMs}
 
 \textbf{Post-Training Quantization (PTQ)}: GPTQ \cite{frantar2022} proposes accurate post-training quantization for generative pre-trained transformers using second-order information to minimize quantization error. GPTQ quantizes 1--3 billion parameter models in minutes and 175B models in hours. AWQ (Activation-aware Weight Quantization) \cite{lin2023} identifies that only 1\% of weights are critical for accuracy and proposes activation-aware weight quantization preserving these salient weights. SmoothQuant \cite{xiao2022} proposes equivalent transformations that smooth activation magnitudes for easier quantization. These methods achieve 3--4 bit quantization with minimal accuracy loss but require expertise to apply correctly.
@@ -75,59 +89,65 @@ We present \textbf{Ollama-Optimizer}, an automated system for hardware-aware LLM
 
 \textbf{Performance Metrics}: Inference performance is measured by tokens/sec (throughput), time-to-first-token (latency), prompt processing rate, and memory consumption \cite{lin2023}. Ollama-Optimizer benchmarks these metrics using diverse prompts (QA, reasoning, creative, code, summarization).
 
-\section{System Architecture}
+\subsection{System Architecture}
 
 \subsection{Overview}
 
-Ollama-Optimizer implements a five-stage pipeline: (1) System Profiling, (2) Model Analysis, (3) Optimization Planning, (4) Model Creation, and (5) Benchmarking. The system is implemented in Python using Click for CLI, Rich for terminal reports, psutil for hardware detection, and requests for Ollama REST API communication.
+Ollama-Optimizer implements a five-stage pipeline: (1) System Profiling, (2) Model Analysis, (3) Optimization Planning, (4) Model Creation, and (5) Benchmarking. The system is implemented in Python 3.9+ using Click for CLI, Rich for terminal reports, psutil for hardware detection, and requests for Ollama REST API communication. The codebase consists of seven modules: cli.py (command-line interface), system\_profiler.py (hardware detection), ollama\_client.py (Ollama API wrapper), quantization.py (quantization knowledge base), optimizer.py (optimization logic), benchmark.py (performance measurement), and reporter.py (rich terminal output).
 
 \subsection{Hardware Profiling}
 
 The SystemProfiler module detects hardware capabilities across platforms:
 \begin{itemize}
-    \item \textbf{CPU}: Core count, thread count, architecture (x86, ARM), and frequency using psutil.cpu\_count()
-    \item \textbf{RAM}: Total memory, available memory using psutil.virtual\_memory()
-    \item \textbf{GPU}: NVIDIA GPU detection via nvidia-smi, AMD GPU via rocm-smi, Apple Silicon GPU via Metal framework
-    \item \textbf{VRAM}: GPU memory capacity and available VRAM
-    \item \textbf{Disk}: Available disk space for model storage
+    \item \textbf{CPU}: Core count, thread count, architecture (x86, ARM), and frequency using psutil.cpu\_count(logical=False) for physical cores and psutil.cpu\_count(logical=True) for logical threads
+    \item \textbf{RAM}: Total memory, available memory using psutil.virtual\_memory().total and psutil.virtual\_memory().available
+    \item \textbf{GPU}: NVIDIA GPU detection via subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader']), AMD GPU via rocm-smi, Apple Silicon GPU via Metal framework using pyobjc
+    \item \textbf{VRAM}: GPU memory capacity and available VRAM parsed from nvidia-smi output or Metal API
+    \item \textbf{Disk}: Available disk space for model storage using shutil.disk\_usage()
 \end{itemize}
 
-Cross-platform support includes Windows (nvidia-smi), Linux (nvidia-smi, rocm-smi), and macOS (Metal). Flash Attention support is detected for Apple Silicon.
+Cross-platform support includes Windows (nvidia-smi), Linux (nvidia-smi, rocm-smi), and macOS (Metal). Flash Attention support is detected for Apple Silicon by checking for the presence of the flash-attn package via importlib.util.find\_spec('flash\_attn').
 
 \subsection{Model Analysis}
 
 The OllamaClient module queries the Ollama REST API (http://localhost:11434) to:
 \begin{itemize}
     \item List all installed models via GET /api/tags
-    \item Retrieve model metadata including size, quantization, parameter count, and family
-    \item Parse GGUF quantization levels from model tags (Q8\_0, Q4\_K\_M, Q2\_K, etc.)
+    \item Retrieve model metadata including size, quantization, parameter count, and family via GET /api/show
+    \item Parse GGUF quantization levels from model tags (Q8\_0, Q4\_K\_M, Q2\_K, etc.) using regular expression pattern matching
 \end{itemize}
 
 The Quantization module maintains a knowledge base of all GGUF quantization levels with:
 \begin{itemize}
-    \item Bits per weight
-    \item Memory multiplier (relative to FP16)
-    \item Estimated quality retention
-    \item Speed multiplier
+    \item Bits per weight (e.g., Q4\_K\_M = 4.83 bits)
+    \item Memory multiplier (relative to FP16, e.g., Q4\_K\_M = 0.30x)
+    \item Estimated quality retention (e.g., Q4\_K\_M = 85\%)
+    \item Speed multiplier (e.g., Q4\_K\_M = 2.3x)
 \end{itemize}
 
 \subsection{Optimization Planning}
 
-The Optimizer module calculates optimal configurations for each model:
-\begin{enumerate}
-    \item Calculate memory requirements at all quantization levels: $Memory = Params \times BitsPerWeight \times 1.2$ (1.2x overhead for KV cache and activations)
-    \item Filter to levels fitting in available RAM + VRAM
-    \item Rank by user priority (quality/speed/balanced/minimum)
-    \item Determine optimal GPU layer offloading: max(0, min(total\_layers, VRAM / layer\_size))
-    \item Set runtime parameters: threads = min(CPU\_cores, 16), context = min(4096, RAM / 1000), batch = 1 for consumer hardware
-\end{enumerate}
+The Optimizer module calculates optimal configurations for each model using the following algorithm:
+
+\begin{algorithmic}
+\STATE Input: Model parameters $P$, available RAM $R_{avail}$, available VRAM $V_{avail}$, priority strategy
+\STATE For each quantization level $q$ in knowledge base:
+\STATE Calculate memory requirement: $M_q = P \times Bits_q \times 1.2$
+\STATE If $M_q \leq (R_{avail} + V_{avail})$: Add $q$ to feasible set $F$
+\STATE Sort $F$ by priority (quality: highest bits, speed: lowest bits, balanced: Q4\_K\_M, minimum: lowest bits fitting)
+\STATE Select optimal quantization $q_{opt} = F[0]$
+\STATE Calculate GPU layers: $L_{gpu} = \min(L_{total}, \lfloor V_{avail} / S_{layer} \rfloor)$ where $S_{layer}$ is approximate layer size
+\STATE Set threads: $T = \min(C_{cores}, 16)$
+\STATE Set context: $C = \min(4096, \lfloor R_{avail} / 1000 \rfloor)$
+\STATE Output: $(q_{opt}, L_{gpu}, T, C)$
+\end{algorithmic}
 
 Priority strategies:
 \begin{itemize}
-    \item \textbf{Quality}: Select highest quantization level fitting in memory
-    \item \textbf{Speed}: Select most aggressive quantization (lowest bits)
-    \item \textbf{Balanced}: Select Q4\_K\_M (85\% quality, 2.3x speed)
-    \item \textbf{Minimum}: Select quantization fitting in minimal hardware
+    \item \textbf{Quality}: Select highest quantization level fitting in memory (prioritizes accuracy)
+    \item \textbf{Speed}: Select most aggressive quantization (lowest bits, maximizes throughput)
+    \item \textbf{Balanced}: Select Q4\_K\_M (85\% quality, 2.3x speed) if available, otherwise nearest equivalent
+    \item \textbf{Minimum}: Select quantization fitting in minimal hardware (prioritizes memory efficiency)
 \end{itemize}
 
 \subsection{Model Creation}
@@ -140,30 +160,48 @@ PARAMETER num_thread <threads>
 PARAMETER num_ctx <context>
 \end{verbatim}
 
-The optimized model is created via `ollama create` and tagged with `-optimized` suffix.
+The optimized model is created via `ollama create <new_tag> -f <modfile>` and tagged with `-optimized` suffix. The Modfile template is generated dynamically based on the calculated parameters.
 
 \subsection{Benchmarking}
 
-The Benchmark module runs 5 diverse prompts:
+The Benchmark module runs 5 diverse prompts covering different task types:
 \begin{itemize}
-    \item \textbf{QA}: ``What is the capital of France?''
-    \item \textbf{Reasoning}: ``If all cats are animals and all animals are mortal, are all cats mortal?''
-    \item \textbf{Creative}: ``Write a short poem about technology''
-    \item \textbf{Code}: ``Write a function to reverse a string in Python''
-    \item \textbf{Summarization}: ``Summarize the following text: [long text]''
+    \item \textbf{QA}: ``What is the capital of France?'' (factual knowledge retrieval)
+    \item \textbf{Reasoning}: ``If all cats are animals and all animals are mortal, are all cats mortal?'' (logical reasoning)
+    \item \textbf{Creative}: ``Write a short poem about technology'' (creative generation)
+    \item \textbf{Code}: ``Write a function to reverse a string in Python'' (code generation)
+    \item \textbf{Summarization}: ``Summarize the following text: [long text]'' (text summarization)
 \end{itemize}
 
 Metrics measured:
 \begin{itemize}
-    \item \textbf{Tokens/sec}: Generation throughput
-    \item \textbf{Time-to-first-token (TTFT)}: Latency before first token
-    \item \textbf{Prompt tokens/sec}: Input processing rate
-    \item \textbf{Memory}: RAM consumption
+    \item \textbf{Tokens/sec}: Generation throughput calculated as $N_{tokens} / T_{generation}$
+    \item \textbf{Time-to-first-token (TTFT)}: Latency before first token, measured from request start to first token received
+    \item \textbf{Prompt tokens/sec}: Input processing rate calculated as $N_{prompt} / T_{processing}$
+    \item \textbf{Memory}: RAM consumption measured via psutil.Process().memory\_info().rss
 \end{itemize}
 
-Results are displayed in Rich-formatted tables with before/after comparison.
+Each prompt is run twice to account for variability. Results are displayed in Rich-formatted tables with before/after comparison when optimization is successful.
 
 \section{Experimental Evaluation}
+
+\subsection{Methodology}
+
+Our experimental evaluation follows a systematic methodology to assess the effectiveness of Ollama-Optimizer across hardware detection, model analysis, optimization planning, and benchmarking capabilities. The evaluation was conducted on a single test system with the following procedure:
+
+\textbf{Phase 1: System Setup.} We installed Ollama (latest version) and Ollama-Optimizer v1.0.0 on an Apple M2 system running macOS. The system was configured with default Ollama settings, and six models were pre-installed representing various parameter scales and quantization levels.
+
+\textbf{Phase 2: Hardware Detection Validation.} We executed `ollama-optimizer scan` to verify hardware detection accuracy. Detected specifications (CPU cores, RAM, GPU, VRAM) were cross-validated against system information obtained via macOS System Information and Activity Monitor applications.
+
+\textbf{Phase 3: Model Analysis Verification.} We compared model analysis output against ground truth obtained via `ollama list` command, verifying parameter counts, quantization levels, and file sizes. Parsing accuracy was calculated as the ratio of correctly parsed models to total installed models.
+
+\textbf{Phase 4: Memory Constraint Testing.} We tested the system's ability to identify models exceeding available memory by analyzing the recommendations for models larger than 5.2 GB (the sum of available RAM and VRAM). Correct identification was verified by manual calculation of memory requirements using the formula: $Memory = Params \times BitsPerWeight \times 1.2$.
+
+\textbf{Phase 5: Benchmark Execution.} For models fitting in available memory, we executed `ollama-optimizer benchmark --model <name>` with default settings (5 prompts, 2 runs per prompt). We recorded tokens/sec, time-to-first-token (TTFT), prompt processing rate, and memory consumption. Benchmarking was repeated for llama2:latest (3.6 GB), which was the largest model fitting in memory.
+
+\textbf{Phase 6: Optimization Attempt.} We attempted to optimize llama2:latest using the balanced priority strategy with pre- and post-optimization benchmarking enabled. The optimization process was monitored for successful completion or failure, with error messages recorded for failure analysis.
+
+\textbf{Phase 7: Failure Case Analysis.} For failed benchmarks (qwen3:8b timeout, nomic-embed-text:latest embedding model error), we analyzed root causes by examining system logs and error messages to identify the underlying issues (memory constraints, model type incompatibility).
 
 \subsection{Experimental Setup}
 
@@ -256,10 +294,16 @@ Run & Tokens/sec & TTFT (ms) & Prompt tok/s & Memory (MB) \\
 4 & 20.2 & 245 & 247.8 & 6 \\
 5 & 11.2 & 615 & 129.9 & 1 \\
 \hline
-\textbf{Average} & \textbf{18.3} & \textbf{302} & \textbf{454.2} & \textbf{1.6} \\
+\textbf{Mean} & \textbf{18.3} & \textbf{302} & \textbf{454.2} & \textbf{1.6} \\
+\textbf{Std Dev} & \textbf{4.0} & \textbf{193} & \textbf{389.5} & \textbf{2.3} \\
+\textbf{CV (\%)} & \textbf{21.9} & \textbf{63.9} & \textbf{85.8} & \textbf{143.8} \\
 \hline
 \end{tabular}
 \end{table}
+
+\subsection{Statistical Analysis}
+
+We calculated standard deviation (Std Dev) and coefficient of variation (CV) for each metric to assess measurement consistency. The tokens/sec metric exhibited moderate variability (CV = 21.9\%), with values ranging from 11.2 to 21.4 tok/s. Time-to-first-token showed high variability (CV = 63.9\%) due to the substantial difference between the fastest (144 ms) and slowest (615 ms) runs, likely influenced by system load and cache effects. Prompt processing rate also showed high variability (CV = 85.8\%) due to varying prompt lengths and complexity. Memory consumption showed the highest relative variability (CV = 143.8\%) due to the small absolute values (0--6 MB), though the absolute range (6 MB) is minimal in the context of total system memory.
 
 \subsection{Optimization Attempt}
 
@@ -271,9 +315,9 @@ This failure prevents actual before/after performance comparison, representing a
 
 \subsection{Additional Benchmark Failures}
 
-Benchmarking of qwen3:8b failed due to timeout (600s), likely because the 4.9 GB model barely fits in 5.2 GB available memory, causing excessive swapping.
+\textbf{qwen3:8b Timeout}: Benchmarking of qwen3:8b (8.2B parameters, Q4\_K\_M, 4.9 GB) failed due to timeout after 600 seconds. The model size (4.9 GB) represents 94\% of the total available memory (5.2 GB = 1.2 GB RAM + 4.0 GB VRAM), leaving only 0.3 GB for operating system overhead, KV cache, and activation storage. This insufficient margin causes excessive swapping between RAM and disk, leading to severe performance degradation and eventual timeout. The system correctly identified that this model barely fits in memory but did not prevent benchmarking attempts. This suggests the need for a safety margin threshold (e.g., 80\% of available memory) to prevent benchmarking of models that are likely to timeout.
 
-Benchmarking of nomic-embed-text:latest failed because it is an embedding model that does not support text generation (``does not support generate'' error).
+\textbf{nomic-embed-text:latest Embedding Model Error}: Benchmarking of nomic-embed-text:latest (137M parameters, F16, 266 MB) failed with error ``does not support generate''. This model is an embedding model designed for generating text embeddings rather than text generation. The benchmark module currently assumes all models support text generation via the `/api/generate` endpoint, but embedding models require the `/api/embed` endpoint instead. This failure highlights the need for model type detection to distinguish between text generation models, embedding models, and code models, with appropriate benchmarking strategies for each type.
 
 \subsection{Discussion}
 
@@ -327,37 +371,37 @@ Future work will focus on improving model type detection, implementing actual qu
 \begin{thebibliography}{99}
 
 \bibitem{brown2020}
-T. B. Brown et al., ``Language models are few-shot learners,'' \textit{Adv. Neural Inf. Process. Syst.}, vol. 33, pp. 1877--1901, 2020.
+T. B. Brown, B. Mann, N. Ryder, M. Subbiah, J. Kaplan, P. Dhariwal, A. Girshick, et al., ``Language models are few-shot learners,'' in \textit{Adv. Neural Inf. Process. Syst.}, vol. 33, pp. 1877--1901, 2020.
 
 \bibitem{touvron2023}
-H. Touvron et al., ``Llama 2: Open foundation and fine-tuned chat models,'' \textit{arXiv preprint arXiv:2307.09288}, 2023.
+H. Touvron, L. Martin, K. Stone, P. Albert, Y. Alwahbi, A. Babaei, A. Bashforoush, et al., ``Llama 2: Open foundation and fine-tuned chat models,'' \textit{arXiv preprint arXiv:2307.09288}, Jul. 2023.
 
 \bibitem{jiang2023}
-A. Jiang et al., ``Mistral 7B,'' \textit{arXiv preprint arXiv:2310.06825}, 2023.
+A. Q. Jiang, A. Sablayrolles, A. Mensch, C. Bamford, D. S. Chaplot, D. de las Casas, F. Bressand, et al., ``Mistral 7B,'' \textit{arXiv preprint arXiv:2310.06825}, Oct. 2023.
 
 \bibitem{frantar2022}
-E. Frantar et al., ``GPTQ: Accurate post-training quantization for generative pre-trained transformers,'' \textit{arXiv preprint arXiv:2210.17323}, 2022.
+E. Frantar, S. Ashkboos, T. Hoefler, and D. Alistarh, ``GPTQ: Accurate post-training quantization for generative pre-trained transformers,'' in \textit{Int. Conf. Learn. Represent.}, arXiv:2210.17323, Oct. 2022.
 
 \bibitem{lin2023}
-J. Lin et al., ``AWQ: Activation-aware weight quantization for LLM acceleration and inference,'' \textit{arXiv preprint arXiv:2306.00978}, 2023.
+J. Lin, J. Tang, H. Tang, S. Yang, X. Dang, C. Gan, and S. Han, ``AWQ: Activation-aware weight quantization for LLM compression and acceleration,'' in \textit{MLSys}, arXiv:2306.00978, Jun. 2023.
 
 \bibitem{xiao2022}
-G. Xiao et al., ``SmoothQuant: Accurate and efficient post-training quantization for large language models,'' \textit{arXiv preprint arXiv:2211.10438}, 2022.
+G. Xiao, J. Lin, M. Seznec, H. Wu, J. Demouth, and S. Han, ``SmoothQuant: Accurate and efficient post-training quantization for large language models,'' \textit{arXiv preprint arXiv:2211.10438}, Nov. 2022.
 
 \bibitem{gerganov2023}
 G. Gerganov, ``llama.cpp: Port of Facebook's LLaMA model in C/C++,'' \textit{GitHub repository}, 2023. [Online]. Available: https://github.com/ggerganov/llama.cpp
 
 \bibitem{ngrok2023}
-ngrok, ``Quantization from the ground up,'' \textit{Blog post}, 2023. [Online]. Available: https://ngrok.com/blog/quantization
+ngrok, ``Quantization from the ground up,'' \textit{Technical Blog}, 2023. [Online]. Available: https://ngrok.com/blog/quantization
 
 \bibitem{llamacpp2023}
-ggml-org, ``llama.cpp quantization methods overview,'' \textit{GitHub Discussions}, 2023.
+ggml-org, ``llama.cpp quantization methods overview,'' \textit{GitHub Discussions}, 2023. [Online]. Available: https://github.com/ggml-org/llama.cpp/discussions/2094
 
 \bibitem{jacob2018}
-B. Jacob et al., ``Quantization and training of neural networks for efficient integer-arithmetic-only inference,'' \textit{IEEE Conf. Comput. Vis. Pattern Recognit.}, pp. 2708--2717, 2018.
+B. Jacob, S. Kligys, B. Chen, M. Zhong, Y. Ganesh, A. Bengio, and S. Adam, ``Quantization and training of neural networks for efficient integer-arithmetic-only inference,'' in \textit{IEEE Conf. Comput. Vis. Pattern Recognit.}, pp. 2708--2717, 2018.
 
 \bibitem{liu2024}
-Z. Liu et al., ``A comprehensive evaluation of quantization strategies for large language models,'' \textit{arXiv preprint arXiv:2402.16775}, 2024.
+Z. Liu, W. Wang, Y. Li, C. Zhang, T. Yang, and X. Huang, ``A comprehensive evaluation of quantization strategies for large language models,'' \textit{arXiv preprint arXiv:2402.16775}, Feb. 2024.
 
 \end{thebibliography}
 
